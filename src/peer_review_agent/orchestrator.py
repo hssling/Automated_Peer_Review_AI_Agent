@@ -25,6 +25,8 @@ except ImportError as exc:  # pragma: no cover
         "python-docx is required for peer-review outputs. Install via `pip install python-docx`."
     ) from exc
 
+from .config import RuntimeConfig
+
 
 SUPPORTED_EXTS = (".pdf", ".docx")
 DERIVED_MARKERS = ("_auto_", "_peer_review", "_annotated", "_redline")
@@ -48,31 +50,6 @@ class ArticleMetrics:
     discussion_present: bool
     precision_terms: bool
     external_validity_flags: List[str] = field(default_factory=list)
-
-
-DESIGN_KEYWORDS: List[Tuple[str, str]] = [
-    ("randomized", "Randomized controlled trial"),
-    ("randomised", "Randomized controlled trial"),
-    ("prospective", "Prospective cohort"),
-    ("retrospective", "Retrospective cohort"),
-    ("case-control", "Case-control study"),
-    ("cross-sectional", "Cross-sectional study"),
-    ("meta-analysis", "Meta-analysis"),
-]
-
-STAT_METHODS: List[Tuple[str, str]] = [
-    ("poisson", "Poisson regression"),
-    ("cox", "Cox proportional hazards"),
-    ("logistic", "Logistic regression"),
-    ("hazard ratio", "Hazard ratios reported"),
-    ("odds ratio", "Odds ratios reported"),
-    ("kaplan-meier", "Kaplan-Meier analysis"),
-    ("mixed model", "Mixed-effects models"),
-    ("anova", "ANOVA / general linear models"),
-    ("chi-square", "Chi-square tests"),
-    ("multivariate", "Multivariable modeling"),
-    ("generalized linear", "Generalized linear models"),
-]
 
 
 # --------------------------------------------------------------------------- #
@@ -115,8 +92,8 @@ def _second_non_empty(lines: Sequence[str]) -> str:
     return non_empty[1] if len(non_empty) > 1 else ""
 
 
-def _detect_design(text_lower: str) -> str:
-    for keyword, label in DESIGN_KEYWORDS:
+def _detect_design(text_lower: str, design_keywords: List[Tuple[str, str]]) -> str:
+    for keyword, label in design_keywords:
         if keyword in text_lower:
             return label
     return "Design not explicitly stated"
@@ -140,20 +117,20 @@ def _sentences_containing(text: str, keyword: str) -> List[str]:
     return [s.strip() for s in sentences if keyword.lower() in s.lower()]
 
 
-def _detect_stat_methods(text_lower: str) -> List[str]:
-    return sorted({label for keyword, label in STAT_METHODS if keyword in text_lower})
+def _detect_stat_methods(text_lower: str, stat_methods: List[Tuple[str, str]]) -> List[str]:
+    return sorted({label for keyword, label in stat_methods if keyword in text_lower})
 
 
-def _build_metrics(text: str) -> ArticleMetrics:
+def _build_metrics(text: str, config: RuntimeConfig) -> ArticleMetrics:
     lines = text.splitlines()
     text_lower = text.lower()
     title = _first_non_empty(lines)
     authors_line = _second_non_empty(lines)
-    design = _detect_design(text_lower)
+    design = _detect_design(text_lower, config.design_keywords)
     sample_size = _detect_sample_size(text)
     follow_up_notes = _sentences_containing(text, "follow-up")
     loss_to_follow_up = "loss to follow-up" in text_lower or "lost to follow-up" in text_lower
-    stat_methods = _detect_stat_methods(text_lower)
+    stat_methods = _detect_stat_methods(text_lower, config.stat_methods)
     multivariable = any(token in text_lower for token in ("multivariable", "multivariate", "adjusted"))
     power_reported = "power" in text_lower and "sample size" in text_lower
     interactions_reported = "interaction" in text_lower
@@ -288,8 +265,21 @@ def _render_report(
 # Output generators
 
 
-def _generate_ppt(metrics: ArticleMetrics, strengths: List[str], gaps: List[str], ppt_path: Path) -> None:
-    prs = Presentation()
+def _generate_ppt(
+    metrics: ArticleMetrics,
+    strengths: List[str],
+    gaps: List[str],
+    ppt_path: Path,
+    template_path: Optional[str],
+) -> None:
+    if template_path:
+        try:
+            prs = Presentation(template_path)
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"[warn] Failed to load PPT template '{template_path}': {exc}. Using default.")
+            prs = Presentation()
+    else:
+        prs = Presentation()
 
     def add_bullets(title: str, bullets: Iterable[str]) -> None:
         slide = prs.slides.add_slide(prs.slide_layouts[1])
@@ -393,8 +383,16 @@ def _generate_peer_review_doc(
     gaps: List[str],
     text: str,
     output_path: Path,
+    template_path: Optional[str],
 ) -> None:
-    doc = Document()
+    if template_path:
+        try:
+            doc = Document(template_path)
+        except Exception as exc:  # pragma: no cover
+            print(f"[warn] Failed to load peer-review template '{template_path}': {exc}. Using default.")
+            doc = Document()
+    else:
+        doc = Document()
     doc.add_heading("Peer Review & Critical Comments", level=1)
     doc.add_paragraph(f"Article: {metrics.title}")
     doc.add_paragraph(f"Design cue: {metrics.design}")
@@ -459,57 +457,24 @@ def _derive_action_items(metrics: ArticleMetrics) -> List[str]:
     return items
 
 
-def _derive_section_guidance(metrics: ArticleMetrics) -> Dict[str, List[Tuple[str, str]]]:
+def _derive_section_guidance(
+    metrics: ArticleMetrics,
+    config: RuntimeConfig,
+) -> Dict[str, List[Tuple[str, str]]]:
     guidance: Dict[str, List[Tuple[str, str]]] = {
-        "ABSTRACT": [
-            (
-                "Clarify study design, sample size, and primary outcomes with quantitative values.",
-                "Suggested rewrite: 'Methods: Retrospective cohort of 2006 drug-susceptible TB patients; Poisson models estimated adjusted incidence rate ratios with 95% CI.'",
-            )
-        ],
-        "INTRODUCTION": [
-            (
-                "Focus on the specific knowledge gap this manuscript addresses rather than broad epidemiology.",
-                "Suggested rewrite: 'Despite national TB surveillance, few multicenter cohorts report post-treatment recurrence under programmatic conditions; this study addresses that gap.'",
-            )
-        ],
-        "METHODS": [
-            (
-                "Detail sampling frame, inclusion/exclusion criteria, assay platforms, and data sources.",
-                "Suggested rewrite: 'We consecutively enrolled adults ≥15 years with microbiologically confirmed TB, excluding MDR cases and records lacking HIV results; thyroid assays used chemiluminescent immunoassay (CV<5%).'",
-            )
-        ],
-        "STATISTICAL ANALYSIS": [
-            (
-                "Specify statistical tests, regression models, covariate selection, and software versions.",
-                "Suggested rewrite: 'Comparisons used chi-square or Fisher exact tests; multivariable Poisson regression with site-level clustering generated adjusted IRRs (Stata 17).'",
-            )
-        ],
-        "RESULTS": [
-            (
-                "Provide numerators/denominators and 95% CIs for key outcomes rather than narrative statements.",
-                "Suggested rewrite: 'Unfavorable outcomes occurred in 365/2006 (18.2%, 95% CI 16.5-19.9); loss to follow-up accounted for 137 cases (6.8%).'",
-            )
-        ],
-        "DISCUSSION": [
-            (
-                "Interpret findings relative to similar cohorts and discuss plausible mechanisms for discrepancies.",
-                "Suggested rewrite: 'Higher loss to follow-up versus RePORT Brazil likely reflects inpatient recruitment and limited post-discharge tracing at our sites.'",
-            )
-        ],
-        "CONCLUSION": [
-            (
-                "Add a Limitations paragraph acknowledging retrospective design, tertiary sampling, and missing adherence data.",
-                "Suggested rewrite: 'Limitations include retrospective abstraction, reliance on tertiary centers, and absence of adherence/ glycemic control data, which may limit generalizability.'",
-            )
-        ],
-        "REFERENCES": [
-            (
-                "Verify citation formatting and ensure all guidelines cited in text appear in the reference list.",
-                "Suggested rewrite: 'Add WHO 2023 End TB report and NTEP 2025 guidelines referenced in the introduction.'",
-            )
-        ],
+        section: list(entries) for section, entries in config.section_guidance.items()
     }
+    for section in [
+        "ABSTRACT",
+        "INTRODUCTION",
+        "METHODS",
+        "STATISTICAL ANALYSIS",
+        "RESULTS",
+        "DISCUSSION",
+        "CONCLUSION",
+        "REFERENCES",
+    ]:
+        guidance.setdefault(section, [])
 
     if not metrics.power_reported:
         guidance["METHODS"].append(
@@ -562,8 +527,16 @@ def _generate_redline_doc(
     action_items: List[str],
     section_guidance: Dict[str, List[Tuple[str, str]]],
     output_path: Path,
+    template_path: Optional[str],
 ) -> None:
-    redline_doc = Document()
+    if template_path:
+        try:
+            redline_doc = Document(template_path)
+        except Exception as exc:  # pragma: no cover
+            print(f"[warn] Failed to load redline template '{template_path}': {exc}. Using default.")
+            redline_doc = Document()
+    else:
+        redline_doc = Document()
     redline_doc.add_heading("Peer Review Redline + Action Plan", level=1)
     redline_doc.add_paragraph(
         "Reviewer summary: Manuscript requires revisions to methodological transparency, "
@@ -616,6 +589,7 @@ def _generate_redline_doc(
 def process_article(
     article_path: Path,
     *,
+    config: RuntimeConfig,
     force: bool = False,
     generate_peer_review: bool = False,
     annotate: bool = False,
@@ -650,22 +624,37 @@ def process_article(
     print(f"[info] Processing {article_path.name}")
     text = _extract_text(article_path)
     text_path.write_text(text, encoding="utf-8")
-    metrics = _build_metrics(text)
+    metrics = _build_metrics(text, config)
     strengths = _strengths_from_metrics(metrics)
     gaps = _gaps_from_metrics(metrics)
     report = _render_report(metrics, article_path, text_path, strengths, gaps)
     report_path.write_text(report, encoding="utf-8")
-    _generate_ppt(metrics, strengths, gaps, ppt_path)
+    _generate_ppt(metrics, strengths, gaps, ppt_path, config.templates.get("ppt"))
 
     suggestions = _build_track_change_suggestions(metrics, text)
     if generate_peer_review:
-        _generate_peer_review_doc(metrics, strengths, gaps, text, peer_path)
+        _generate_peer_review_doc(
+            metrics,
+            strengths,
+            gaps,
+            text,
+            peer_path,
+            config.templates.get("peer_review_docx"),
+        )
     if annotate:
         _generate_annotation_text(text, suggestions, annotations_path)
     if redline:
         action_items = _derive_action_items(metrics)
-        section_guidance = _derive_section_guidance(metrics)
-        _generate_redline_doc(article_path, text, metrics, action_items, section_guidance, redline_path)
+        section_guidance = _derive_section_guidance(metrics, config)
+        _generate_redline_doc(
+            article_path,
+            text,
+            metrics,
+            action_items,
+            section_guidance,
+            redline_path,
+            config.templates.get("redline_docx"),
+        )
 
     print(f"[done] Generated outputs for {article_path.name}")
 
@@ -682,6 +671,7 @@ def process_articles(
     *,
     root: Path,
     folder: Optional[Path],
+    config: RuntimeConfig,
     force: bool,
     peer_review: bool,
     annotate: bool,
@@ -705,9 +695,9 @@ def process_articles(
         for article in article_files:
             process_article(
                 article,
+                config=config,
                 force=force,
                 generate_peer_review=peer_review,
                 annotate=annotate,
                 redline=redline,
             )
-

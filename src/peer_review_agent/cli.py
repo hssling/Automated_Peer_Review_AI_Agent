@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 from . import get_version
+from .config import load_config
 from .orchestrator import process_articles
 
 
@@ -23,6 +24,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--folder",
         type=Path,
         help="Process a single folder (overrides --root discovery).",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="Optional JSON/YAML config file to override heuristics/templates.",
     )
     parser.add_argument(
         "--force",
@@ -51,9 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
+    runtime_config = load_config(args.config)
     process_articles(
         root=args.root,
         folder=args.folder,
+        config=runtime_config,
         force=args.force,
         peer_review=args.peer_review,
         annotate=args.annotate,
@@ -63,4 +71,3 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     main()
-

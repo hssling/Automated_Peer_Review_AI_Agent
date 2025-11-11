@@ -76,7 +76,21 @@ Flags:
 - `--peer-review` – create structured DOCX peer-review memo.
 - `--annotate` – emit annotated text with inline pseudo comments.
 - `--redline` – generate redline-style DOCX with action plan and rewrite suggestions (works for PDF inputs via extracted text).
+- `--config path/to/config.json` – override heuristics, section guidance, or template paths using a JSON/YAML file (see `config/sample_config.json` for the schema).
 - `--force` – rebuild outputs even if files already exist.
+
+### Custom heuristics & templates
+
+The agent ships with sensible defaults, but you can tailor the behavior via a config file:
+
+```bash
+peer-review-agent --folder "./My Study" --config config/my_rules.json --redline
+```
+
+- Accepts `.json`, `.yaml`, or `.yml` (YAML parsing requires `pyyaml`, install with `pip install pyyaml`).
+- Fields you omit inherit the defaults.
+- Template entries (`templates.ppt`, `templates.peer_review_docx`, `templates.redline_docx`) point to brand-specific PPTX/DOCX files that the agent now uses when generating artifacts (fallbacks are applied if loading fails).
+- A minimal starter file lives at `config/sample_config.json`.
 
 ## Output Artifacts
 
