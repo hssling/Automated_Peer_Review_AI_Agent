@@ -36,7 +36,18 @@ An end-to-end automation toolkit that ingests research articles (PDF or DOCX), e
    ```
    After installing, invoke `peer-review-agent --help`.
 
-3. **Containerization (suggested)**  
+3. **Standalone binaries (new)**  
+   Build a single-file executable with PyInstaller for users without Python:
+   ```bash
+   # Linux/macOS
+   ./packaging/build_binary.sh
+
+   # Windows PowerShell
+   ./packaging/build_binary.ps1
+   ```
+   The resulting binary lives under `dist/peer-review-agent/`. Distribute this artifact directly or attach it to GitHub Releases.
+
+4. **Containerization (suggested)**  
    For fully reproducible deployments (CI agents, on-prem review services), wrap the CLI in a lightweight Python container (e.g., Python 3.11-slim) and mount the articles directory. See “Future Enhancements” for ideas.
 
 ## CLI Usage
