@@ -1,0 +1,18 @@
+changelog:
+  categories:
+    - title: 🚀 Features
+      labels:
+        - enhancement
+        - feature
+    - title: 🛠 Fixes & Maintenance
+      labels:
+        - bug
+        - maintenance
+    - title: 📦 Packaging & Distribution
+      labels:
+        - packaging
+        - release
+    - title: 🧪 Tests & CI
+      labels:
+        - test
+        - ci
